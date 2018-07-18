@@ -1,0 +1,176 @@
+#!/sbin/runscript
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright © 2007-2018 ANSSI. All Rights Reserved.
+# Copyright 2006-2008 SGDN/DCSSI
+# Copyright 2009-2013 SGDSN/ANSSI
+# Author: Vincent Strubel <clipos@ssi.gouv.fr>
+# All rights reserved
+
+description="Start RM jails"
+
+depend() {
+	need vprocunhide reducecap clip_audit netlocal jail_init
+}
+
+get_conf() {
+	CLIPCONF="/etc/conf.d/clip"
+	NET_FILE="/etc/admin/conf.d/net"
+
+	source "/lib/clip/jails.sub"
+	source "/etc/conf.d/jail-net"
+	source "/lib/clip/import.sub"
+	source "/lib/clip/net.sub"
+	source "${CLIPCONF}"
+
+
+	IMPORT_ADDRESSES="RMH_ADDR RMB_ADDR"
+	import_conf_noerr "${NET_FILE}" "${_IMPORT_FILTER_ADDR}|virtual" $IMPORT_ADDRESSES 2>/dev/null
+
+	SERVER_ROOT="/vservers"
+	SERVER_CONF="/etc/jails"
+}
+
+get_addr_string() {
+	local server="$1"
+	local addr=""
+	case "${server}" in
+		rm_h)
+			addr="-a ${RMH_LOCAL_ADDR}/255.255.255.255 -l ${RMH_LOCAL_ADDR}"
+			[[ -n "${RMH_ADDR}" && "${RMH_ADDR}" != "virtual" ]] && \
+				addr="${addr} -a ${RMH_ADDR}/255.255.255.255 -b ${RMH_ADDR}"
+			;;
+		rm_b)
+			addr="-a ${RMB_LOCAL_ADDR}/255.255.255.255 -l ${RMB_LOCAL_ADDR}"
+			[[ -n "${RMB_ADDR}" && "${RMB_ADDR}" != "virtual" ]] && \
+				addr="${addr} -a ${RMB_ADDR}/255.255.255.255 -b ${RMB_ADDR}"
+			;;
+		*)
+			ewarn "Invalid jail name ${server}"
+			return 1
+			;;
+	esac
+	echo "${addr}"
+}
+
+clean_sockets() {
+	local root="${1}"
+	local sock
+	for sock in update_root/log update_priv/user_root/log update_priv/audit_root/log; do
+		if [[ -e "${root}/${sock}" && ! -L "${root}/${sock}" ]]; then 
+			rm -f "${root}/${sock}" \
+				|| ewarn "failed to remove ${root}/${sock}"
+		fi
+	done
+
+	if [[ -S "{root}/user_priv/var/run/vnc/vnc1" ]]; then
+		rm -f "${root}/user_priv/var/run/vnc/vnc1" \
+			|| ewarn "failed to remove vnc socket in ${root}"
+	fi
+}
+
+start() {
+	get_conf
+	local ret=0 f server
+
+	for f in "/mounts/admin_priv/var/run/"has_jail_*; do
+		[[ -f "${f}" ]] && rm -f "${f}"
+	done
+	for f in "/mounts/user_priv/var/run/"has_jail_*; do
+		[[ -f "${f}" ]] && rm -f "${f}"
+	done
+
+	if [[ -z "${CLIP_LAYOUT}" ]]; then
+		eerror "No layout defined"
+		return 1
+	fi
+	echo "${CLIP_LAYOUT}" >"/mounts/user_priv/var/run/viewmode"
+
+	local ret=0
+
+	for server in ${CLIP_JAILS}; do
+		echo "${CLIP_LAYOUT}" >"${SERVER_ROOT}/${server}/user_priv/var/run/viewmode"
+		
+		local xid="$(< "${SERVER_CONF}/${server}/context")"
+		local addr="$(get_addr_string ${server})"
+		if [[ -z "${addr}" ]] ; then
+			ewarn "Could not get address string for ${server}"
+			break
+		fi			
+		local devnull="/mounts/vsdev/${server}/jail_devs/null"
+		local devarg="-i ${devnull} -o ${devnull}"
+
+		ebegin "Setting up jail: ${server}"
+
+		clean_sockets "/vservers/${server}"
+		if ! jail_setup_wait "${server}" ${addr} ${devarg}; then
+			eend 1 "Failed to setup jail ${server}"
+			ret=1
+			continue
+		fi
+
+		# We need write access on the underlying vfsmnt to load entries
+		#  => update_root rather than update
+		vsctl ${devarg} ${server} enter \
+			-c /update_root -- /bin/verictl.sh -l  || ret=1
+		vsctl ${devarg} ${server} enter \
+			-c /update -- /bin/verictl.sh -l /usr/local  || ret=1
+
+		[[ $ret -eq 0 ]] || ewarn "Failed to load veriexec entries in ${server}"
+
+		if [ -f "${SERVER_CONF}/${server}/veriexec.lvl-up" ] ; then
+			local lvl="$(< "${SERVER_CONF}/${server}/veriexec.lvl-up")"
+			if [[ -e "/vservers/${server}/update_root/etc/verictl.d/clip-install-common" ]]; then
+				lvl="${lvl}:enforce_inherit"
+			fi
+			verictl -L "${xid}-${lvl}" || ret=1
+		fi
+		local syslogcmd
+		if [[ -e "/vservers/${server}/update_root/usr/sbin/run-syslog" ]]; then
+			syslogcmd="/update/usr/sbin/run-syslog"
+		else
+			syslogcmd="/update/usr/sbin/syslog-ng -C /audit -f /update/etc/syslog-ng/syslog-ng.conf -u syslog -g syslog"
+			syslogcmd="${syslogcmd} --pidfile /var/run/syslog/syslog-ng.pid -c /var/run/syslog/syslog-ng.ctl"
+		fi
+
+		vsctl ${devarg} ${server} enter -- ${syslogcmd}
+
+		addr="${addr%%/*}"
+		vsctl ${devarg} -e "LOCAL_ADDR=${addr}" ${server} enter \
+			-- /update/bin/jailmaster || ret=1
+		touch "/mounts/admin_priv/var/run/has_jail_${server}"
+		touch "/mounts/user_priv/var/run/has_jail_${server}"
+
+		eend $ret
+
+	done
+}
+
+stop() {
+	get_conf
+
+	local server 
+	for server in ${CLIP_JAILS}; do
+		local xid="$(< "${SERVER_CONF}/${server}/context")"
+		local devnull="/mounts/vsdev/${server}/jail_devs/null"
+		local devarg="-i ${devnull} -o ${devnull}" 
+
+		if ! yesno "${RC_GOINGDOWN}"; then
+			# No point in removing the entries when stopping the system
+			if [ -f "${SERVER_CONF}/${server}/veriexec.lvl-down" ] ; then
+				vebegin "Disabling veriexec for server ${server}"
+				verictl -L "${xid}-"`cat "${SERVER_CONF}/${server}/veriexec.lvl-down"`
+				veend $?
+			fi
+
+			vebegin "Unloading verictl entries in server ${server}"
+			vsctl ${devarg} ${server} enter -c /update_root -- /bin/verictl.sh -u
+			vsctl ${devarg} ${server} enter -c /update -- /bin/verictl.sh -u /usr/local
+			veend $?
+		fi
+		
+		ebegin "Stopping server : ${server}"
+		jail_terminate "${server}"
+		eend $?
+
+	done
+}

@@ -1,0 +1,4 @@
+TYPE="user"
+ENCRYPTED_ID="\xde\xad\xbe\xef" 
+SIGNED_ID="\xd3\xad\xb3\x3f"
+JAIL_NAME="Bas"

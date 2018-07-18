@@ -1,0 +1,26 @@
+# keep this file in mount order...
+# Update view
+/update_root 		/update 		none	bind,ro,nodev,noatime
+/update_priv/var	/update/var		none	bind,rw,nodev,nosuid,noatime
+/update_priv/var/shared	/update/var/shared	none	bind,rw,nodev,nosuid,noatime,nolock,nosymfollow
+/update_priv/tmp	/update/tmp		none	bind,rw,mode=1777,noexec,nodev,nosuid,noatime
+/update_priv/usr_local	/update/usr/local	none	bind,rw,nodev,noatime
+/update_priv/user_root	/update/user_root 	none	bind,rw,noexec,nodev,nosuid,noatime
+/update_priv/audit_root /update/audit_root 	none	bind,rw,noexec,nodev,nosuid,noatime
+# User view
+/update_priv/user_root	/user			none	bind,ro,nosuid,noatime,nodev
+/update/usr	 	/user/usr		none	bind,ro,nodev,nosuid,noatime
+/update_priv/usr_local	/user/usr/local		none	bind,ro,nodev,noatime
+/update/lib 		/user/lib		none	bind,ro,nodev,nosuid,noatime
+/update/etc/shared	/user/etc/shared	none	bind,ro,noexec,nodev,nosuid,noatime
+/user_priv/home		/user/home		none	bind,rw,noexec,nodev,nosuid,noatime
+/user_priv/var		/user/var		none	bind,rw,noexec,nodev,nosuid,noatime
+/update_priv/var/shared	/user/var/shared	none	bind,rw,noexec,nodev,nosuid,noatime
+# Audit view
+/update_priv/audit_root	/audit			none	bind,ro,nodev,noatime
+/update/etc/shared	/audit/etc/shared	none	bind,ro,noexec,nodev,nosuid,noatime
+/audit_priv/var		/audit/var		none	bind,rw,noexec,nodev,nosuid,noatime
+# Admin etc
+/admin_priv/etc.admin	/update/etc/admin 	none	bind,rw,noexec,nodev,nosuid,noatime
+/admin_priv/etc.admin	/user/etc/admin 	none	bind,ro,noexec,nodev,nosuid,noatime
+/admin_priv/etc.admin	/audit/etc/admin 	none	bind,ro,noexec,nodev,nosuid,noatime

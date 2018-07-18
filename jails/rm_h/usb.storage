@@ -1,0 +1,4 @@
+TYPE="user"
+ENCRYPTED_ID="\x13\x37\xc0\xde" 
+SIGNED_ID="\x1e\xe7\xc0\xd3"
+JAIL_NAME="Haut"

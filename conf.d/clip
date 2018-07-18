@@ -1,0 +1,8 @@
+# Noms des vservers a lancer 
+CLIP_JAILS="rm_h rm_b"
+
+# Mode d'affichage
+CLIP_LAYOUT="mixborder"
+
+# Confirmation lors d'un montage
+MOUNT_CONFIRM="yes"
